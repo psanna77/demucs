@@ -62,7 +62,7 @@ def train_model(epoch,
                 optimizer.step()
                 optimizer.zero_grad()
 
-                o.write(loss.item() + "\n")
+                o.write(str(loss.item()) + "\n")
                 o.flush()
 
                 total_loss += loss.item()
@@ -109,7 +109,7 @@ def validate_model(epoch,
             loss = criterion(estimates, sources)
             current_loss += loss.item() / len(indexes)
             del estimates, streams, sources
-            o.write(loss + "\n")
+            o.write(str(loss.item()) + "\n")
             o.flush()
 
     if world_size > 1:
