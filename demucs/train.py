@@ -61,6 +61,8 @@ def train_model(epoch,
             optimizer.step()
             optimizer.zero_grad()
 
+            print(loss.item())
+
             total_loss += loss.item()
             current_loss = total_loss / (1 + idx)
             tq.set_postfix(loss=f"{current_loss:.4f}")
@@ -103,6 +105,7 @@ def validate_model(epoch,
         estimates = apply_model(model, mix, shifts=shifts, split=split)
         loss = criterion(estimates, sources)
         current_loss += loss.item() / len(indexes)
+        print(loss.item())
         del estimates, streams, sources
 
     if world_size > 1:
