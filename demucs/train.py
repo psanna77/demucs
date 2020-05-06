@@ -45,6 +45,7 @@ def train_model(epoch,
                        file=sys.stdout,
                        unit=" batch")
         total_loss = 0
+        losses = []
         for idx, streams in enumerate(tq):
             if len(streams) < batch_size:
                 # skip uncomplete batch for augment.Remix to work properly
@@ -61,7 +62,7 @@ def train_model(epoch,
             optimizer.step()
             optimizer.zero_grad()
 
-            print(loss.item())
+            losses.append(loss.item())
 
             total_loss += loss.item()
             current_loss = total_loss / (1 + idx)
@@ -69,6 +70,10 @@ def train_model(epoch,
 
             # free some space before next round
             del streams, sources, mix, estimates, loss
+
+        with open("train_loss.txt", "a") as o:
+            for loss in losses:
+                o.write(loss + "\n");
 
         if world_size > 1:
             sampler.epoch += 1
@@ -95,6 +100,7 @@ def validate_model(epoch,
                    file=sys.stdout,
                    unit=" track")
     current_loss = 0
+    losses = []
     for index in tq:
         streams = dataset[index]
         # first five minutes to avoid OOM on --upsample models
@@ -105,8 +111,12 @@ def validate_model(epoch,
         estimates = apply_model(model, mix, shifts=shifts, split=split)
         loss = criterion(estimates, sources)
         current_loss += loss.item() / len(indexes)
-        print(loss.item())
+        losses.append(loss.item())
         del estimates, streams, sources
+
+    with open("val_loss.txt", "a") as o:
+        for loss in losses:
+            o.write(loss + "\n");
 
     if world_size > 1:
         current_loss = average_metric(current_loss, len(indexes))
