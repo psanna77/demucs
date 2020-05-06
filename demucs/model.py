@@ -28,7 +28,7 @@ class BLSTM(nn.Module):
 
 def rescale_conv(conv, reference):
     std = conv.weight.std().detach()
-    scale = (std / reference)**0.5
+    scale = (std / reference) ** 0.5
     conv.weight.data /= scale
     if conv.bias is not None:
         conv.bias.data /= scale
@@ -110,11 +110,11 @@ class Demucs(nn.Module):
         self.channels = channels
 
         self.encoder = nn.ModuleList()
-        self.decoder = nn.ModuleList()
+        self.decoder = []
 
-        self.final = None
+        self.final = []
         if upsample:
-            self.final = nn.Conv1d(channels + audio_channels, sources * audio_channels, 1)
+            self.final = [nn.Conv1d(channels + audio_channels, 1 * audio_channels, 1) for _ in range(4)]
             stride = 1
 
         if glu:
@@ -124,34 +124,42 @@ class Demucs(nn.Module):
             activation = nn.ReLU()
             ch_scale = 1
         in_channels = audio_channels
+        prev_channels = channels
         for index in range(depth):
             encode = []
             encode += [nn.Conv1d(in_channels, channels, kernel_size, stride), nn.ReLU()]
             if rewrite:
                 encode += [nn.Conv1d(channels, ch_scale * channels, 1), activation]
             self.encoder.append(nn.Sequential(*encode))
-
-            decode = []
-            if index > 0:
-                out_channels = in_channels
-            else:
-                if upsample:
-                    out_channels = channels
-                else:
-                    out_channels = sources * audio_channels
-            if rewrite:
-                decode += [nn.Conv1d(channels, ch_scale * channels, context), activation]
-            if upsample:
-                decode += [
-                    nn.Conv1d(channels, out_channels, kernel_size, stride=1),
-                ]
-            else:
-                decode += [nn.ConvTranspose1d(channels, out_channels, kernel_size, stride)]
-            if index > 0:
-                decode.append(nn.ReLU())
-            self.decoder.insert(0, nn.Sequential(*decode))
             in_channels = channels
             channels = int(growth * channels)
+
+        for i in range(4):
+            in_channels = audio_channels
+            channels = prev_channels
+            self.decoder.append(nn.ModuleList())
+            for index in range(depth):
+                decode = []
+                if index > 0:
+                    out_channels = in_channels
+                else:
+                    if upsample:
+                        out_channels = channels
+                    else:
+                        out_channels = 1 * audio_channels
+                if rewrite:
+                    decode += [nn.Conv1d(channels, ch_scale * channels, context), activation]
+                if upsample:
+                    decode += [
+                        nn.Conv1d(channels, out_channels, kernel_size, stride=1),
+                    ]
+                else:
+                    decode += [nn.ConvTranspose1d(channels, out_channels, kernel_size, stride)]
+                if index > 0:
+                    decode.append(nn.ReLU())
+                self.decoder[i].insert(0, nn.Sequential(*decode))
+                in_channels = channels
+                channels = int(growth * channels)
 
         channels = in_channels
 
@@ -193,24 +201,31 @@ class Demucs(nn.Module):
 
     def forward(self, mix):
         x = mix
-        saved = [x]
+        saved = [x for _ in range(4)]
         for encode in self.encoder:
             x = encode(x)
-            saved.append(x)
+            for i in range(4):
+                saved[i].append(x)
             if self.upsample:
                 x = downsample(x, self.stride)
         if self.lstm:
             x = self.lstm(x)
-        for decode in self.decoder:
-            if self.upsample:
-                x = upsample(x, stride=self.stride)
-            skip = center_trim(saved.pop(-1), x)
-            x = x + skip
-            x = decode(x)
-        if self.final:
-            skip = center_trim(saved.pop(-1), x)
-            x = th.cat([x, skip], dim=1)
-            x = self.final(x)
+        encoded = x
+        decoded = []
+        for i in range(4):
+            x = encoded
+            for decode in self.decoder[i]:
+                if self.upsample:
+                    x = upsample(x, stride=self.stride)
+                skip = center_trim(saved[i].pop(-1), x)
+                x = x + skip
+                x = decode(x)
+            if self.final:
+                skip = center_trim(saved[i].pop(-1), x)
+                x = th.cat([x, skip], dim=1)
+                x = self.final(x)
 
+            decoded[i] = x
+        x = th.cat(decoded, dim=1)
         x = x.view(x.size(0), self.sources, self.audio_channels, x.size(-1))
         return x
