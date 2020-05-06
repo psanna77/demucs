@@ -45,35 +45,32 @@ def train_model(epoch,
                        file=sys.stdout,
                        unit=" batch")
         total_loss = 0
-        losses = []
-        for idx, streams in enumerate(tq):
-            if len(streams) < batch_size:
-                # skip uncomplete batch for augment.Remix to work properly
-                continue
-            streams = streams.to(device)
-            sources = streams[:, 1:]
-            sources = augment(sources)
-            mix = sources.sum(dim=1)
+        with open("train_loss.txt", 'a') as o:
+            for idx, streams in enumerate(tq):
+                if len(streams) < batch_size:
+                    # skip uncomplete batch for augment.Remix to work properly
+                    continue
+                streams = streams.to(device)
+                sources = streams[:, 1:]
+                sources = augment(sources)
+                mix = sources.sum(dim=1)
 
-            estimates = model(mix)
-            sources = center_trim(sources, estimates)
-            loss = criterion(estimates, sources)
-            loss.backward()
-            optimizer.step()
-            optimizer.zero_grad()
+                estimates = model(mix)
+                sources = center_trim(sources, estimates)
+                loss = criterion(estimates, sources)
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
 
-            losses.append(loss.item())
+                o.write(loss.item() + "\n")
+                o.flush()
 
-            total_loss += loss.item()
-            current_loss = total_loss / (1 + idx)
-            tq.set_postfix(loss=f"{current_loss:.4f}")
+                total_loss += loss.item()
+                current_loss = total_loss / (1 + idx)
+                tq.set_postfix(loss=f"{current_loss:.4f}")
 
-            # free some space before next round
+                # free some space before next round
             del streams, sources, mix, estimates, loss
-
-        with open("train_loss.txt", "a") as o:
-            for loss in losses:
-                o.write(loss + "\n");
 
         if world_size > 1:
             sampler.epoch += 1
@@ -100,23 +97,20 @@ def validate_model(epoch,
                    file=sys.stdout,
                    unit=" track")
     current_loss = 0
-    losses = []
-    for index in tq:
-        streams = dataset[index]
-        # first five minutes to avoid OOM on --upsample models
-        streams = streams[..., :15_000_000]
-        streams = streams.to(device)
-        sources = streams[1:]
-        mix = streams[0]
-        estimates = apply_model(model, mix, shifts=shifts, split=split)
-        loss = criterion(estimates, sources)
-        current_loss += loss.item() / len(indexes)
-        losses.append(loss.item())
-        del estimates, streams, sources
-
-    with open("val_loss.txt", "a") as o:
-        for loss in losses:
-            o.write(loss + "\n");
+    with open("val_loss.txt", "w") as o:
+        for index in tq:
+            streams = dataset[index]
+            # first five minutes to avoid OOM on --upsample models
+            streams = streams[..., :15_000_000]
+            streams = streams.to(device)
+            sources = streams[1:]
+            mix = streams[0]
+            estimates = apply_model(model, mix, shifts=shifts, split=split)
+            loss = criterion(estimates, sources)
+            current_loss += loss.item() / len(indexes)
+            del estimates, streams, sources
+            o.write(loss + "\n")
+            o.flush()
 
     if world_size > 1:
         current_loss = average_metric(current_loss, len(indexes))
