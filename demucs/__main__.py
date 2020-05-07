@@ -225,6 +225,9 @@ def main():
                 key: value.to("cpu").clone()
                 for key, value in model.state_dict().items()
             }
+            model.to("cpu")
+        save_model(model, args.models / f"{name}.th")
+        model.to(device=device)
         saved.metrics.append({
             "train": train_loss,
             "valid": valid_loss,
